@@ -23,5 +23,5 @@ pub struct Ballot {
 
 pub const CONFIG: Item<Config> = Item::new("config");
 
-pub const POLLS: Map<String, Poll> = Map::new("polls");
-pub const BALLOTS: Map<(Addr, String), Ballot> = Map::new("ballots");
+pub const POLLS: Map<&str, Poll> = Map::new("polls");
+pub const BALLOTS: Map<(Addr, &str), Ballot> = Map::new("ballots");
