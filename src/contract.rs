@@ -5,7 +5,7 @@ use cw2::set_contract_version;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{Config, Poll, CONFIG, POLLS};
+use crate::state::{Ballot, Config, Poll, BALLOTS, CONFIG, POLLS};
 
 const CONTRACT_NAME: &str = "crates.io:cw-starter";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -42,11 +42,62 @@ pub fn execute(
             question,
             options,
         } => execute_create_poll(deps, env, info, poll_id, question, options),
-        ExecuteMsg::Vote { poll_id, vote } => unimplemented!(),
+        ExecuteMsg::Vote { poll_id, vote } => execute_vote(deps, env, info, poll_id, vote),
         ExecuteMsg::DeletePoll { poll_id } => unimplemented!(),
         ExecuteMsg::RevokeVote { poll_id } => unimplemented!(),
         _ => unimplemented!(),
     }
+}
+
+fn execute_vote(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    poll_id: String,
+    vote: String,
+) -> Result<Response, ContractError> {
+    let poll = POLLS.may_load(deps.storage, poll_id.clone())?;
+
+    if poll.is_none() {
+        return Err(ContractError::PollNotFound {});
+    }
+
+    let mut poll = poll.unwrap();
+
+    BALLOTS.update(
+        deps.storage,
+        (info.sender.clone(), poll_id.clone()),
+        |ballot| -> StdResult<Ballot> {
+            match ballot {
+                Some(ballot) => {
+                    let position_of_old_vote = poll
+                        .options
+                        .iter()
+                        .position(|option| option.0 == ballot.option)
+                        .unwrap();
+                    poll.options[position_of_old_vote].1 -= 1;
+                    Ok(Ballot {
+                        option: vote.clone(),
+                    })
+                }
+                None => Ok(Ballot {
+                    option: vote.clone(),
+                }),
+            }
+        },
+    )?;
+
+    let position = poll.options.iter().position(|option| option.0 == vote);
+    if position.is_none() {
+        return Err(ContractError::PollOptionNotFound { poll_id: poll_id });
+    }
+    poll.options[position.unwrap()].1 += 1;
+    POLLS.save(deps.storage, poll_id.clone(), &poll)?;
+
+    Ok(Response::new()
+        .add_attribute("poll_id", poll_id)
+        .add_attribute("option", vote)
+        .add_attribute("voter", info.sender))
 }
 
 fn execute_create_poll(
@@ -75,7 +126,7 @@ fn execute_create_poll(
     POLLS.save(deps.storage, poll_id.clone(), &poll)?;
 
     Ok(Response::new()
-        .add_attribute("poll_created_with_id", poll_id)
+        .add_attribute("poll_id", poll_id)
         .add_attribute("number_of_options", poll.options.len().to_string())
         .add_attribute("owner", poll.creator))
 }

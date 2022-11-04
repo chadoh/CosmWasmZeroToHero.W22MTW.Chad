@@ -12,6 +12,12 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
-    #[error("Too  many poll options (max: 10)")]
+    #[error("Too many poll options (max: 10)")]
     TooManyOptions {},
+
+    #[error("Poll not found")]
+    PollNotFound {},
+
+    #[error("Option not found for poll #{poll_id:?}")]
+    PollOptionNotFound { poll_id: String },
 }
