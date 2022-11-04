@@ -43,9 +43,9 @@ pub fn execute(
             options,
         } => execute_create_poll(deps, env, info, poll_id, question, options),
         ExecuteMsg::Vote { poll_id, vote } => execute_vote(deps, env, info, poll_id, vote),
-        ExecuteMsg::DeletePoll { poll_id } => unimplemented!(),
-        ExecuteMsg::RevokeVote { poll_id } => unimplemented!(),
         _ => unimplemented!(),
+        // ExecuteMsg::DeletePoll { poll_id } => unimplemented!(),
+        // ExecuteMsg::RevokeVote { poll_id } => unimplemented!(),
     }
 }
 
@@ -59,7 +59,7 @@ fn execute_vote(
     let poll = POLLS.may_load(deps.storage, poll_id.clone())?;
 
     if poll.is_none() {
-        return Err(ContractError::PollNotFound {});
+        return Err(ContractError::PollNotFound { poll_id: poll_id });
     }
 
     let mut poll = poll.unwrap();
@@ -89,12 +89,16 @@ fn execute_vote(
 
     let position = poll.options.iter().position(|option| option.0 == vote);
     if position.is_none() {
-        return Err(ContractError::PollOptionNotFound { poll_id: poll_id });
+        return Err(ContractError::PollOptionNotFound {
+            poll_id: poll_id,
+            bad_option: vote,
+        });
     }
     poll.options[position.unwrap()].1 += 1;
     POLLS.save(deps.storage, poll_id.clone(), &poll)?;
 
     Ok(Response::new()
+        .add_attribute("action", "execute_vote")
         .add_attribute("poll_id", poll_id)
         .add_attribute("option", vote)
         .add_attribute("voter", info.sender))
@@ -126,6 +130,7 @@ fn execute_create_poll(
     POLLS.save(deps.storage, poll_id.clone(), &poll)?;
 
     Ok(Response::new()
+        .add_attribute("action", "execute_create_poll")
         .add_attribute("poll_id", poll_id)
         .add_attribute("number_of_options", poll.options.len().to_string())
         .add_attribute("owner", poll.creator))
@@ -138,8 +143,9 @@ pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
 
 #[cfg(test)]
 mod tests {
-    use crate::contract::instantiate;
-    use crate::msg::InstantiateMsg;
+    use crate::contract::{execute, instantiate};
+    use crate::error::ContractError;
+    use crate::msg::{ExecuteMsg, InstantiateMsg};
     use cosmwasm_std::attr;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
 
@@ -176,5 +182,163 @@ mod tests {
             res.attributes,
             vec![attr("action", "instantiate"), attr("admin", ADDR2)]
         )
+    }
+
+    #[test]
+    fn test_execute_create_poll_valid() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &vec![]);
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id".to_string(),
+            question: "What's your favourite Cosmos coin?".to_string(),
+            options: vec![
+                "Cosmos Hub".to_string(),
+                "Juno".to_string(),
+                "Osmosis".to_string(),
+            ],
+        };
+
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "execute_create_poll"),
+                attr("poll_id", "some_id"),
+                attr("number_of_options", "3"),
+                attr("owner", ADDR1),
+            ]
+        )
+    }
+
+    #[test]
+    fn test_execute_create_poll_invalid() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &vec![]);
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id".to_string(),
+            question: "What's your favourite number?".to_string(),
+            options: vec![
+                "1".to_string(),
+                "2".to_string(),
+                "3".to_string(),
+                "4".to_string(),
+                "5".to_string(),
+                "6".to_string(),
+                "7".to_string(),
+                "8".to_string(),
+                "9".to_string(),
+                "10".to_string(),
+                "11".to_string(),
+            ],
+        };
+
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+
+        assert!(matches!(res, ContractError::TooManyOptions {}))
+    }
+
+    #[test]
+    fn test_execute_vote_valid() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &vec![]);
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id".to_string(),
+            question: "What's your favourite Cosmos coin?".to_string(),
+            options: vec![
+                "Cosmos Hub".to_string(),
+                "Juno".to_string(),
+                "Osmosis".to_string(),
+            ],
+        };
+
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id".to_string(),
+            vote: "Juno".to_string(),
+        };
+
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "execute_vote"),
+                attr("poll_id", "some_id"),
+                attr("option", "Juno"),
+                attr("voter", ADDR1),
+            ],
+        );
+
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id".to_string(),
+            vote: "Osmosis".to_string(),
+        };
+
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "execute_vote"),
+                attr("poll_id", "some_id"),
+                attr("option", "Osmosis"),
+                attr("voter", ADDR1),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_execute_vote_invalid() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &vec![]);
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::Vote {
+            poll_id: "OOPS_WRONG_ID".to_string(),
+            vote: "Juno".to_string(),
+        };
+
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+
+        assert!(matches!(res, ContractError::PollNotFound { poll_id: _ }));
+
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id".to_string(),
+            question: "What's your favourite Cosmos coin?".to_string(),
+            options: vec!["Juno".to_string()],
+        };
+
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id".to_string(),
+            vote: "OOPS INVALID OPTION".to_string(),
+        };
+
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+
+        assert!(matches!(
+            res,
+            ContractError::PollOptionNotFound {
+                poll_id: _,
+                bad_option: _,
+            }
+        ));
     }
 }
